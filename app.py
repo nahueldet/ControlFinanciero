@@ -1,97 +1,126 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime
 import os
 
-# Configuración inicial de la página
-st.set_page_config(page_title="Dashboard Financiero", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Control Financiero Personal", page_icon="💰", layout="wide")
+
+# Nombre del archivo para guardar los datos locales (como alternativa si no usas Firebase/Google Sheets en esta prueba)
+DATA_FILE = "movimientos_personales.csv"
+
+# Categorías predefinidas (basadas en la estructura de tu archivo y finanzas personales)
+CATEGORIAS_INGRESO = ["Sueldo", "Servicios Profesionales", "Rendimientos Financieros", "Ventas", "Otros Ingresos"]
+CATEGORIAS_GASTO = ["Alimentación", "Vivienda / Servicios", "Transporte", "Tarjetas de Crédito / Cuotas", "Ocio / Entretenimiento", "Salud", "Educación", "Otros Gastos"]
+
+def load_data():
+    if os.path.exists(DATA_FILE):
+        df = pd.read_csv(DATA_FILE)
+        df['Fecha'] = pd.to_datetime(df['Fecha']).dt.date
+        return df
+    else:
+        return pd.DataFrame(columns=["Fecha", "Tipo", "Categoría", "Descripción", "Monto", "Forma de Pago"])
+
+def save_data(df):
+    df.to_csv(DATA_FILE, index=False)
 
 def main():
-    st.title("📊 Panel de Control Financiero")
+    st.title("💰 Mi Control Financiero Personal")
     
-    # 1. Carga del archivo Excel
-    archivo_excel = "Control Financiero Completo.xlsx"
-    
-    if not os.path.exists(archivo_excel):
-        st.error(f"No se encontró el archivo: {archivo_excel}. Asegúrate de que esté en la misma carpeta que este script.")
-        st.stop()
+    df = load_data()
+
+    # --- BARRA LATERAL: NUEVO REGISTRO ---
+    st.sidebar.header("➕ Nuevo Movimiento")
+    with st.sidebar.form("nuevo_movimiento"):
+        fecha = st.date_input("Fecha", datetime.today())
+        tipo = st.selectbox("Tipo de Movimiento", ["Gasto", "Ingreso"])
         
-    @st.cache_data
-    def cargar_datos(ruta):
-        xls = pd.ExcelFile(ruta)
-        # Leer todas las hojas en un diccionario de DataFrames
-        return {hoja: pd.read_excel(xls, sheet_name=hoja) for hoja in xls.sheet_names}
-
-    try:
-        datos = cargar_datos(archivo_excel)
-    except Exception as e:
-        st.error(f"Error al leer el archivo Excel: {e}")
-        st.stop()
-
-    # 2. Barra lateral para navegación
-    st.sidebar.header("⚙️ Configuración del Panel")
-    nombres_hojas = list(datos.keys())
-    hoja_actual = st.sidebar.selectbox("Selecciona la hoja a visualizar:", nombres_hojas)
-    
-    df = datos[hoja_actual]
-    
-    st.subheader(f"Datos base: {hoja_actual}")
-    st.dataframe(df, use_container_width=True)
-
-    st.write("---")
-    
-    # 3. Asignación dinámica de columnas
-    st.sidebar.subheader("Mapeo de Variables")
-    st.sidebar.write("Asigna las columnas para generar tu reporte visual.")
-    
-    columnas = df.columns.tolist()
-    
-    # Función para intentar autodetectar columnas comunes
-    def buscar_col(palabras_clave):
-        for col in columnas:
-            if any(palabra in str(col).lower() for palabra in palabras_clave):
-                return columnas.index(col)
-        return 0
-
-    idx_fecha = buscar_col(['fecha', 'date', 'mes', 'registro'])
-    idx_monto = buscar_col(['monto', 'valor', 'total', 'precio', 'saldo', 'costo'])
-    idx_cat = buscar_col(['ingreso', 'gasto', 'tipo', 'categor', 'concepto', 'cuenta'])
-
-    # Selectores para el usuario
-    col_fecha = st.sidebar.selectbox("Columna de Fecha (Opcional)", ["Ninguna"] + columnas, index=idx_fecha + 1 if idx_fecha else 0)
-    col_monto = st.sidebar.selectbox("Columna de Monto/Valor", ["Ninguna"] + columnas, index=idx_monto + 1 if idx_monto else 0)
-    col_categoria = st.sidebar.selectbox("Columna de Categoría", ["Ninguna"] + columnas, index=idx_cat + 1 if idx_cat else 0)
-
-    # 4. Generación de Gráficos si las columnas están configuradas
-    if col_monto != "Ninguna" and col_categoria != "Ninguna":
-        st.subheader("📈 Resumen de Indicadores")
+        # Las categorías cambian según el tipo
+        if tipo == "Ingreso":
+            categoria = st.selectbox("Categoría", CATEGORIAS_INGRESO)
+        else:
+            categoria = st.selectbox("Categoría", CATEGORIAS_GASTO)
+            
+        descripcion = st.text_input("Descripción (Ej: Compra súper, Pago luz)")
+        monto = st.number_input("Monto ($)", min_value=0.01, step=100.0)
+        forma_pago = st.selectbox("Medio de Pago", ["Efectivo", "Tarjeta de Débito", "Tarjeta de Crédito", "Transferencia / Mercado Pago"])
         
-        # Limpieza de datos para cálculos
-        df_clean = df.dropna(subset=[col_monto, col_categoria]).copy()
-        df_clean[col_monto] = pd.to_numeric(df_clean[col_monto], errors='coerce').fillna(0)
+        submit = st.form_submit_button("Guardar Registro")
         
-        # Agrupar datos por la categoría seleccionada
-        resumen = df_clean.groupby(col_categoria)[col_monto].sum().reset_index()
+        if submit:
+            nuevo_registro = pd.DataFrame([{
+                "Fecha": fecha,
+                "Tipo": tipo,
+                "Categoría": categoria,
+                "Descripción": descripcion,
+                "Monto": monto,
+                "Forma de Pago": forma_pago
+            }])
+            df = pd.concat([df, nuevo_registro], ignore_index=True)
+            save_data(df)
+            st.sidebar.success("✅ Registro guardado!")
+            st.rerun() # Recarga la app para mostrar el nuevo dato
+
+    # --- PANTALLA PRINCIPAL ---
+    if df.empty:
+        st.info("👋 ¡Bienvenido! Usa el panel izquierdo para registrar tu primer ingreso o gasto.")
+    else:
+        # Filtros de mes
+        st.subheader("📅 Resumen del Mes")
+        df['Mes'] = pd.to_datetime(df['Fecha']).dt.strftime('%Y-%m')
+        meses_disponibles = sorted(df['Mes'].unique(), reverse=True)
+        mes_seleccionado = st.selectbox("Selecciona el mes a analizar:", meses_disponibles)
         
-        # Mostrar métrica principal
-        col1, col2 = st.columns([1, 3])
-        total = df_clean[col_monto].sum()
-        col1.metric("Monto Total Registrado", f"${total:,.2f}")
+        df_mes = df[df['Mes'] == mes_seleccionado]
         
-        # Visualizaciones
+        # Cálculos de totales
+        ingresos_mes = df_mes[df_mes['Tipo'] == 'Ingreso']['Monto'].sum()
+        gastos_mes = df_mes[df_mes['Tipo'] == 'Gasto']['Monto'].sum()
+        saldo_mes = ingresos_mes - gastos_mes
+        
+        # Mostrar KPIs
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Ingresos", f"${ingresos_mes:,.2f}")
+        col2.metric("Gastos", f"${gastos_mes:,.2f}")
+        col3.metric("Saldo Mensual", f"${saldo_mes:,.2f}", delta=saldo_mes)
+
         st.write("---")
+        
+        # Gráficos
         c1, c2 = st.columns(2)
         
         with c1:
-            fig_bar = px.bar(resumen, x=col_categoria, y=col_monto, title="Distribución por Categoría (Barras)", color=col_categoria)
-            st.plotly_chart(fig_bar, use_container_width=True)
-            
+            st.markdown("#### 💸 Distribución de Gastos")
+            df_gastos = df_mes[df_mes['Tipo'] == 'Gasto']
+            if not df_gastos.empty:
+                fig_gastos = px.pie(df_gastos, names='Categoría', values='Monto', hole=0.4)
+                st.plotly_chart(fig_gastos, use_container_width=True)
+            else:
+                st.write("No hay gastos registrados este mes.")
+
         with c2:
-            fig_pie = px.pie(resumen, names=col_categoria, values=col_monto, title="Proporción de Montos (Circular)")
-            st.plotly_chart(fig_pie, use_container_width=True)
-            
-    else:
-        st.info("💡 Por favor, configura las columnas de 'Monto' y 'Categoría' en la barra lateral para desplegar los gráficos interactivos.")
+            st.markdown("#### 📈 Ingresos vs Gastos")
+            if not df_mes.empty:
+                resumen_tipo = df_mes.groupby('Tipo')['Monto'].sum().reset_index()
+                fig_barras = px.bar(resumen_tipo, x='Tipo', y='Monto', color='Tipo', 
+                                    color_discrete_map={'Ingreso': 'green', 'Gasto': 'red'})
+                st.plotly_chart(fig_barras, use_container_width=True)
+
+        st.write("---")
+        st.markdown("#### 📋 Historial de Movimientos")
+        
+        # Mostrar la tabla formateada
+        df_mostrar = df_mes.drop(columns=['Mes']).sort_values('Fecha', ascending=False)
+        st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
+        
+        # Botón para borrar datos (opcional)
+        with st.expander("⚙️ Opciones avanzadas"):
+            if st.button("Borrar historial del mes seleccionado"):
+                df_restante = df[df['Mes'] != mes_seleccionado].drop(columns=['Mes'], errors='ignore')
+                save_data(df_restante)
+                st.success("Mes borrado. Recargando...")
+                st.rerun()
 
 if __name__ == "__main__":
     main()
